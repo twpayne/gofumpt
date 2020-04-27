@@ -427,6 +427,15 @@ func (f *fumpter) applyPre(c *astutil.Cursor) {
 
 	case *ast.CommClause:
 		f.stmts(node.Body)
+
+	case *ast.FieldList:
+		switch c.Parent().(type) {
+		case *ast.FuncDecl, *ast.FuncType, *ast.InterfaceType:
+			node.List = f.mergeAdjacentFields(node.List)
+			c.Replace(node)
+		case *ast.StructType:
+			// Do not merge adjacent fields in structs.
+		}
 	}
 }
 
@@ -514,6 +523,57 @@ func (f *fumpter) joinStdImports(d *ast.GenDecl) {
 	if needsSort {
 		ast.SortImports(f.fset, f.astFile)
 	}
+}
+
+// mergeAdjacentFields returns a possibly new slice of fields with adjacent
+// fields merged if possible.
+func (f *fumpter) mergeAdjacentFields(fields []*ast.Field) []*ast.Field {
+	// If there are less than two fields then there is nothing to merge.
+	if len(fields) < 2 {
+		return fields
+	}
+
+	// Otherwise, iterate over adjacent pairs of fields, merging if possible,
+	// and mutating list. Elements of fields may be mutated (if merged with
+	// following fields), discarded (if merged with a preceeding field), or left
+	// unchanged.
+	i := 0
+	for j := 1; j < len(fields); j++ {
+		if f.shouldMergeAdjacentFields(fields[i], fields[j]) {
+			fields[i].Names = append(fields[i].Names, fields[j].Names...)
+		} else {
+			i++
+			fields[i] = fields[j]
+		}
+	}
+	return fields[:i+1]
+}
+
+func (f *fumpter) shouldMergeAdjacentFields(f1, f2 *ast.Field) bool {
+	// Do not merge if either field has doc, comments, no names, or the fields
+	// are not on the same line.
+	if f1.Doc != nil || f2.Doc != nil ||
+		f1.Comment != nil || f2.Comment != nil ||
+		len(f1.Names) == 0 || len(f2.Names) == 0 ||
+		f.Line(f1.Pos()) != f.Line(f2.Pos()) {
+		return false
+	}
+
+	// Only merge if the types are equal.
+	return typeEqual(f1.Type, f2.Type)
+}
+
+func typeEqual(t1, t2 ast.Expr) bool {
+	// FIXME the following only works for identified types, extend it to work for anonymous types
+	ident1, ok := t1.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	ident2, ok := t2.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	return ident1.Name == ident2.Name
 }
 
 var posType = reflect.TypeOf(token.NoPos)
