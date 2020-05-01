@@ -437,6 +437,12 @@ func (f *fumpter) applyPre(c *astutil.Cursor) {
 		case *ast.StructType:
 			// Do not merge adjacent fields in structs.
 		}
+
+	case *ast.BasicLit:
+		if node.Kind == token.INT && strings.HasPrefix(node.Value, "0") && !strings.HasPrefix(node.Value, "0o") {
+			node.Value = "0o" + node.Value[1:]
+			c.Replace(node)
+		}
 	}
 }
 
